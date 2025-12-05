@@ -1,0 +1,119 @@
+<?php
+// php/register_process.php
+session_start();
+
+require_once 'config.php';
+require_once 'db.php';
+require_once 'csrf.php';
+require_once 'rate_limit.php';
+// require_once 'email.php';
+
+header('Content-Type: application/json');
+
+// CSRF védelem
+if (!validateCSRFToken($_POST['csrf_token'] ?? '')) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'Invalid CSRF token']);
+    exit;
+}
+
+// Rate limiting: 3 regisztráció / 10 perc
+if (!checkRateLimit('register', 3, 600)) {
+    http_response_code(429);
+    echo json_encode(['success' => false, 'message' => 'Too many registration attempts. Please try again later.']);
+    exit;
+}
+
+// Input validáció
+$username = trim($_POST['username'] ?? '');
+$password = $_POST['password'] ?? '';
+$email = trim($_POST['email'] ?? '');
+
+// Username validáció
+if (strlen($username) < 4 || strlen($username) > 16 || !preg_match('/^[a-zA-Z0-9]+$/', $username)) {
+    echo json_encode(['success' => false, 'message' => 'Username must be 4-16 characters, letters and numbers only']);
+    exit;
+}
+
+// Password validáció
+if (strlen($password) < 4) {
+    echo json_encode(['success' => false, 'message' => 'Password must be at least 4 characters']);
+    exit;
+}
+
+// Email validáció
+if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    echo json_encode(['success' => false, 'message' => 'Invalid email address']);
+    exit;
+}
+
+try {
+    $conn = getDBConnection(DB_LS);
+    
+    // Ellenőrzés: username már létezik?
+    $stmt = $conn->prepare("SELECT login FROM accounts WHERE login = ?");
+    $stmt->bind_param("s", $username);
+    $stmt->execute();
+    if ($stmt->get_result()->num_rows > 0) {
+        echo json_encode(['success' => false, 'message' => 'Username already exists']);
+        exit;
+    }
+    
+    // Ellenőrzés: email már használatban?
+    $stmt = $conn->prepare("SELECT email FROM accounts WHERE email = ?");
+    $stmt->bind_param("s", $email);
+    $stmt->execute();
+    if ($stmt->get_result()->num_rows > 0) {
+        echo json_encode(['success' => false, 'message' => 'Email address already registered']);
+        exit;
+    }
+    
+    // L2J jelszó hash (Base64(SHA1))
+    $sha1 = hash('sha1', $password, true);
+    $hashedPassword = base64_encode($sha1);
+    
+    // Account létrehozása (email_verified = 0)
+    $stmt = $conn->prepare("
+        INSERT INTO accounts (login, password, email, email_verified, access_level, lastactive) 
+        VALUES (?, ?, ?, 0, 0, ?)
+    ");
+    $lastActive = time();
+    $stmt->bind_param("sssi", $username, $hashedPassword, $email, $lastActive);
+    
+    if (!$stmt->execute()) {
+        throw new Exception("Failed to create account");
+    }
+    
+    // Email verification token generálása
+    $token = createVerificationToken($conn, $username, $email, 'verification');
+    
+    if (!$token) {
+        throw new Exception("Failed to create verification token");
+    }
+    
+    // Verification email küldése
+    $emailService = new EmailService();
+    $emailSent = $emailService->sendVerificationEmail($email, $username, $token);
+    
+    if (!$emailSent) {
+        // Email küldés sikertelen - logoljuk, de regisztráció sikeres
+        error_log("Failed to send verification email to: $email");
+    }
+    
+    // Activity log
+    logAccountActivity($conn, $username, 'register', getClientIP(), "Account created, verification email sent to $email");
+    
+    // Rate limit reset sikeres regisztráció után
+    resetRateLimit('register');
+    
+    echo json_encode([
+        'success' => true, 
+        'message' => 'Registration successful! Please check your email to verify your account.',
+        'email_sent' => $emailSent
+    ]);
+    
+} catch (Exception $e) {
+    logError("Registration error: " . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'Registration failed. Please try again later.']);
+}
