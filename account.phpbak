@@ -1,0 +1,184 @@
+<?php
+// account.php
+session_start();
+
+require_once 'php/config.php';
+require_once 'php/db.php';
+
+// Bejelentkezés ellenőrzése
+if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
+    header('Location: login.php');
+    exit;
+}
+
+$username = $_SESSION['username'];
+$userEmail = $_SESSION['email'] ?? '';
+$pageTitle = 'My Account - L2 Savior';
+
+// Donate Coins lekérése
+$donateCoins = 0;
+try {
+    $pdoLS = getDBConnection(DB_LS);
+    $stmt = $pdoLS->prepare("SELECT email FROM accounts WHERE login = ?");
+    $stmt->execute([$username]);
+    $userAccount = $stmt->fetch();
+    $userEmail = $userAccount['email'] ?? $userEmail;
+    
+    // Donate coins - ha van ilyen oszlop
+    $stmt = $pdoLS->prepare("SHOW COLUMNS FROM accounts LIKE 'donate_coins'");
+    $stmt->execute();
+    if ($stmt->fetch()) {
+        $stmt = $pdoLS->prepare("SELECT donate_coins FROM accounts WHERE login = ?");
+        $stmt->execute([$username]);
+        $result = $stmt->fetch();
+        $donateCoins = $result['donate_coins'] ?? 0;
+    }
+} catch (PDOException $e) {
+    error_log("Account page error: " . $e->getMessage());
+}
+
+// Karakterek lekérése
+$characters = [];
+try {
+    $pdoGS = getDBConnection(DB_GS);
+    $stmt = $pdoGS->prepare("
+        SELECT char_name, level, base_class, online 
+        FROM characters 
+        WHERE account_name = ? 
+        ORDER BY level DESC
+    ");
+    $stmt->execute([$username]);
+    $characters = $stmt->fetchAll();
+} catch (PDOException $e) {
+    error_log("Characters fetch error: " . $e->getMessage());
+}
+
+// Class ID → Class Name mapping
+$classNames = [
+    0 => 'Human Fighter', 1 => 'Warrior', 2 => 'Gladiator', 3 => 'Warlord',
+    4 => 'Knight', 5 => 'Paladin', 6 => 'Dark Avenger',
+    7 => 'Rogue', 8 => 'Treasure Hunter', 9 => 'Hawkeye',
+    10 => 'Human Mystic', 11 => 'Wizard', 12 => 'Sorcerer', 13 => 'Necromancer',
+    14 => 'Warlock', 15 => 'Cleric', 16 => 'Bishop', 17 => 'Prophet',
+    18 => 'Elven Fighter', 19 => 'Elven Knight', 20 => 'Temple Knight', 21 => 'Swordsinger',
+    22 => 'Elven Scout', 23 => 'Plains Walker', 24 => 'Silver Ranger',
+    25 => 'Elven Mystic', 26 => 'Elven Wizard', 27 => 'Spellsinger', 28 => 'Elemental Summoner',
+    29 => 'Elven Oracle', 30 => 'Elven Elder',
+    31 => 'Dark Fighter', 32 => 'Palus Knight', 33 => 'Shillien Knight', 34 => 'Bladedancer',
+    35 => 'Assassin', 36 => 'Abyss Walker', 37 => 'Phantom Ranger',
+    38 => 'Dark Mystic', 39 => 'Dark Wizard', 40 => 'Spellhowler', 41 => 'Phantom Summoner',
+    42 => 'Shillien Oracle', 43 => 'Shillien Elder',
+    44 => 'Orc Fighter', 45 => 'Orc Raider', 46 => 'Destroyer',
+    47 => 'Monk', 48 => 'Tyrant',
+    49 => 'Orc Mystic', 50 => 'Orc Shaman', 51 => 'Overlord', 52 => 'Warcryer',
+    53 => 'Dwarf Fighter', 54 => 'Scavenger', 55 => 'Bounty Hunter',
+    56 => 'Artisan', 57 => 'Warsmith'
+];
+
+// Success/Error üzenetek
+$success = $_SESSION['success'] ?? null;
+$error = $_SESSION['error'] ?? null;
+unset($_SESSION['success'], $_SESSION['error']);
+
+include 'includes/header.php';
+?>
+
+<div class="container" style="max-width: 1200px; margin: 80px auto;">
+    <h2 style="font-size: 2rem; background: linear-gradient(90deg, #ffd700, #50c878); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; font-weight: 800; text-align: center;">
+        Welcome, <?php echo htmlspecialchars($username); ?>!
+    </h2><br>
+    
+    <?php if ($success): ?>
+        <div style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; padding: 15px; border-radius: 5px; margin-bottom: 20px; color: #10b981;">
+            ✅ <?php echo htmlspecialchars($success); ?>
+        </div>
+    <?php endif; ?>
+    
+    <?php if ($error): ?>
+        <div style="background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; padding: 15px; border-radius: 5px; margin-bottom: 20px; color: #ef4444;">
+            ❌ <?php echo htmlspecialchars($error); ?>
+        </div>
+    <?php endif; ?>
+    
+    <!-- Account Overview -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 40px;">
+        <div class="card" style="padding: 25px; text-align: center;">
+            <div style="font-size: 36px; margin-bottom: 10px;">👤</div>
+            <h3 style="color: #d4af37; margin-bottom: 10px;">Username</h3>
+            <p style="font-size: 20px; color: #fff;"><?php echo htmlspecialchars($username); ?></p>
+        </div>
+        
+        <div class="card" style="padding: 25px; text-align: center;">
+            <div style="font-size: 36px; margin-bottom: 10px;">✉️</div>
+            <h3 style="color: #d4af37; margin-bottom: 10px;">Email</h3>
+            <p style="font-size: 16px; color: #fff;"><?php echo htmlspecialchars($userEmail); ?></p>
+            <a href="change_email.php" style="color: #10b981; font-size: 14px; text-decoration: none;">Change Email</a>
+        </div>
+        
+        <div class="card" style="padding: 25px; text-align: center;">
+            <div style="font-size: 36px; margin-bottom: 10px;">💰</div>
+            <h3 style="color: #d4af37; margin-bottom: 10px;">Donate Coins</h3>
+            <p style="font-size: 28px; color: #10b981; font-weight: bold;"><?php echo number_format($donateCoins); ?> DC</p>
+            <a href="shop.php" class="btn-primary" style="display: inline-block; margin-top: 10px; padding: 8px 16px; font-size: 14px;">Shop</a>
+        </div>
+        
+        <div class="card" style="padding: 25px; text-align: center;">
+            <div style="font-size: 36px; margin-bottom: 10px;">🎮</div>
+            <h3 style="color: #d4af37; margin-bottom: 10px;">Characters</h3>
+            <p style="font-size: 28px; color: #fff; font-weight: bold;"><?php echo count($characters); ?></p>
+        </div>
+    </div>
+    
+    <!-- My Characters -->
+    <div class="card" style="padding: 30px; margin-bottom: 30px;">
+        <h2 style="color: #d4af37; margin-bottom: 20px;">My Characters</h2>
+        
+        <?php if (empty($characters)): ?>
+            <p style="text-align: center; color: #9ca3af; padding: 40px;">
+                You don't have any characters yet. Login to the game and create one!
+            </p>
+        <?php else: ?>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;">
+                <?php foreach ($characters as $char): ?>
+                    <div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 8px; border: 1px solid #374151;">
+                        <h3 style="color: #d4af37; margin-bottom: 10px;"><?php echo htmlspecialchars($char['char_name']); ?></h3>
+                        <p style="margin: 5px 0;"><strong>Level:</strong> <?php echo $char['level']; ?></p>
+                        <p style="margin: 5px 0;"><strong>Class:</strong> <?php echo $classNames[$char['base_class']] ?? 'Unknown'; ?></p>
+                        <p style="margin: 5px 0;">
+                            <strong>Status:</strong> 
+                            <?php if ($char['online'] == 1): ?>
+                                <span style="color: #10b981;">🟢 Online</span>
+                            <?php else: ?>
+                                <span style="color: #6b7280;">⚫ Offline</span>
+                            <?php endif; ?>
+                        </p>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+    
+    <!-- Quick Actions -->
+    <div class="card" style="padding: 30px;">
+        <h2 style="color: #d4af37; margin-bottom: 20px;">Quick Actions</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+            <a href="change_password.php" class="btn-secondary" style="text-align: center; padding: 15px;">
+                🔑 Change Password
+            </a>
+            <a href="change_email.php" class="btn-secondary" style="text-align: center; padding: 15px;">
+                ✉️ Change Email
+            </a>
+            <a href="shop.php" class="btn-primary" style="text-align: center; padding: 15px;">
+                🛒 Donate Shop
+            </a>
+            <a href="rankings.php" class="btn-secondary" style="text-align: center; padding: 15px;">
+                🏆 Rankings
+            </a>
+            <a href="php/logout.php" class="btn-secondary" style="text-align: center; padding: 15px; background: rgba(239, 68, 68, 0.2); border-color: #ef4444;">
+                🚪 Logout
+            </a>
+        </div>
+    </div>
+</div>
+
+<?php include 'includes/footer.php'; ?>

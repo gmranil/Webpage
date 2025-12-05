@@ -1,0 +1,445 @@
+PROJECT: L2 SAVIOR – L2J Mobius Web Control Panel
+VERSION: v0.9.5 (Security-hardened beta)
+DATE: 2025-12-03
+
+TECH STACK
+
+Backend: PHP 7.4+ (plain PHP, nincs framework)
+
+Frontend: HTML5, CSS3, Vanilla JS
+
+DB: MySQL/MariaDB
+
+Game server: L2J Mobius Interlude (Login Server = l2jmobiusclassic adatbázis)
+
+Auth: L2J-formátumú jelszó (Base64(SHA1(password)))
+
+FŐ KÖNYVTÁR STRUKTÚRA
+
+/l2mobius-web
+
+index.php
+
+features.php
+
+download.php
+
+login.php
+
+register.php
+
+logout.php
+
+account.php
+
+change_password.php
+
+change_email.php (tervezett / részben kész)
+
+shop.php
+
+shop_buy.php
+
+rankings.php
+
+news.php
+
+news_view.php
+
+/includes
+
+header.php (dinamikus nav, session, role alapú menü)
+
+footer.php (footer + js/app.js include)
+
+/php
+
+config.php (DB config + DEBUG_MODE)
+
+db.php (getDBConnection, logError, logAccountActivity, DB konstansok: DB_GS, DB_LS)
+
+csrf.php (generateCSRFToken, getCSRFToken, validateCSRFToken, csrfField, regenerateCSRFToken)
+
+rate_limit.php (checkRateLimit, recordRateLimitAttempt, resetRateLimit, getClientIP)
+
+login_process.php
+
+register_process.php
+
+change_password_process.php
+
+change_email_process.php (tervezett / részben kész)
+
+/admin
+
+index.php (admin dashboard)
+
+players.php (játékos lista / keresés, ban/unban – WIP)
+
+news.php (news CRUD – admin)
+
+shop_items.php (shop item CRUD)
+
+purchases.php (vásárlások kezelése)
+
+coin_management.php (donate coin kezelés)
+
+logout.php (admin logout)
+
+/css
+
+style.css (fő design: dark theme, gold/green)
+
+animations.css (animációk, toast, modal, spinner, skeleton)
+
+/js
+
+app.js (Toast, Modal, form validation helper, Pagination class, stb.)
+
+/logs
+
+error_YYYY-MM-DD.log (fájlok, PHP hibák és custom logError bejegyzések)
+
+ADATBÁZISOK
+
+Használ két adatbázist (L2J Mobius szétválasztás szerint):
+
+Login Server DB: l2jmobiusclassic (vagy hasonló név)
+
+Game Server DB: l2jgs (példa, config.php-ban beállítva)
+
+Fontos táblák (a webes részhez):
+
+Login DB (l2jmobiusclassic):
+
+accounts
+
+login (PK, varchar(45))
+
+password (base64(SHA1(password)), L2J formátum)
+
+access_level (int, 0 = user, 100+ = admin)
+
+donate_coins (int, default 0)
+
+lastactive (bigint, unix timestamp)
+
+email (varchar(100), opcionális)
+
+account_activity
+
+id (PK, auto inc)
+
+username
+
+activity_type (login, logout, password_change, email_change, purchase, coin_add, stb.)
+
+ip_address
+
+details (TEXT)
+
+created_at (TIMESTAMP)
+
+coin_transactions
+
+id (PK, auto inc)
+
+username
+
+type (purchase, donation, admin_add, admin_remove, refund)
+
+amount (int)
+
+balance_after (int)
+
+description (TEXT)
+
+created_at (TIMESTAMP)
+
+Game DB (l2jgs):
+
+characters
+
+char_name
+
+level
+
+base_class (classId → mapping a rankings.php-ben)
+
+online (0/1)
+
+pvpkills
+
+pkkills
+
+account_name
+
+clanid
+
+clan_data
+
+clan_id
+
+clan_name
+
+clan_level
+
+reputation_score
+
+ally_name
+
+shop_items
+
+id (PK)
+
+item_id
+
+item_name
+
+category
+
+price (DC)
+
+enchant
+
+quantity
+
+available (1 = elérhető)
+
+description (TEXT, opcionális)
+
+shop_purchases
+
+id (PK)
+
+username
+
+item_id
+
+item_name
+
+price
+
+status (delivered, pending, cancelled)
+
+purchased_at (TIMESTAMP)
+
+news
+
+id (PK)
+
+title
+
+content (TEXT)
+
+author
+
+tags (comma separated)
+
+published (0/1)
+
+created_at
+
+updated_at
+
+AUTH / SECURITY RÉSZLETEK
+
+Jelszó formátum: Base64(SHA1(password)) – kompatibilis L2J Mobius accounts táblával.
+
+Login folyamat (php/login_process.php):
+
+POST + CSRF token kötelező
+
+Rate limit: 5 próbálkozás / 5 perc / IP (session alapú)
+
+DB lekérdezés: SELECT login, password, access_level FROM accounts WHERE login = ?
+
+Jelszó ellenőrzés:
+
+$sha1 = hash('sha1', $password, true);
+
+$base64 = base64_encode($sha1);
+
+összehasonlítás az adatbázisban lévő password mezővel
+
+Siker esetén:
+
+$_SESSION['logged_in'] = true
+
+$_SESSION['username'] = login
+
+$_SESSION['access_level'] = access_level
+
+lastactive frissítés
+
+logAccountActivity(…, 'login', …)
+
+Register (php/register_process.php):
+
+CSRF + rate limiting (3 / 10 perc)
+
+Username szabály: 4–16 karakter, csak [a-zA-Z0-9]
+
+Password: min 4 karakter
+
+Jelszó mentése Base64(SHA1) formátumban
+
+Change password (php/change_password_process.php):
+
+Bejelentkezés szükséges
+
+CSRF + rate limit
+
+Régi jelszó ellenőrzése L2J hash alapján
+
+Új jelszó: min 4 karakter, nem egyezhet a régivel
+
+Siker esetén: jelszó frissítve, activity log, zöld success üzenet a change_password oldalon, user bejelentkezve marad
+
+NAVIGÁCIÓ & ROLE LOGIKA
+
+includes/header.php:
+
+Session ellenőrzés:
+
+$isLoggedIn = $_SESSION['logged_in'] === true
+
+$username = $_SESSION['username'] ?? ''
+
+$isAdmin = ($_SESSION['access_level'] ?? 0) >= 100
+
+Menü:
+
+Vendég: Home, News, Features, Rankings, Download, Login, Register
+
+User: Home, News, Features, Rankings, Download, Shop, Account, Logout
+
+Admin: plusz “Admin” link (admin/index.php)
+
+FRONTEND FŐ ELEMEK
+
+style.css:
+
+Dark UI, arany (#ffd700) + zöld (#50c878) highlight
+
+Kártya-alapú layout (cards-grid)
+
+Reszponzív: mobile (hamburger menu), tablet, desktop nézet
+
+animations.css:
+
+.loading-overlay + .spinner (globális loading)
+
+.toast-container + .toast (success/error/warning/info toastok)
+
+.modal-overlay + .modal (popup)
+
+Animációk: fadeIn, slideUp, pulse, skeleton loader, stb.
+
+app.js:
+
+showLoading(), hideLoading()
+
+Toast objektum: Toast.success(), Toast.error(), stb.
+
+Modal objektum: Modal.open(title, content, footer), Modal.close()
+
+validateForm(), initRealTimeValidation()
+
+initSearch(inputId, targetSelector, searchKeys) – kereső helper
+
+Pagination class (frontend lapozásra kész)
+
+OLDALAK FUNKCIÓ SZERINT
+
+index.php:
+
+Hero section (Create Account / Download Client gombok – bejelentkezéstől függően)
+
+Latest 3 news kártya formában (title, date, snippet, tags, Read More link)
+
+“Why Choose Us?” feature kártyák
+
+Server info (rates: exp, adena, drop, stb.)
+
+features.php:
+
+Részletes feature lista, rates, extra info blokk
+
+download.php:
+
+Kliens letöltési infók (Google Drive/Torrent link placeholder), system requirements, install guide
+
+login.php:
+
+CSRF, kliens oldali validáció, session üzenetek
+
+register.php:
+
+CSRF, real-time field validation, L2J password formátum a backendben
+
+account.php:
+
+Fiók dashboard: donate_coins, email (ha van), karakterlista (account_name alapján), shop_purchases, coin_transactions, account_activity táblák táblázatos formában
+
+shop.php:
+
+Donate shop: kategória szűrő, item kártyák, buy gomb, ha nem bejelentkezett: figyelmeztetés/login/register gombok
+
+rankings.php:
+
+Tab rendszer: level, pvp, pk, clan
+
+Top 50 lista, classId → className mapping, online/offline státusz
+
+news.php:
+
+Hírlista, rövidített tartalom, “Tovább olvasom” link news_view.php-re
+
+news_view.php:
+
+Teljes cikk display, meta infó, tagek, vissza link news.php-re
+
+ADMIN PANEL RÖVIDEN
+
+(admin/* – részben WIP, de struktúra kész)
+
+admin/index.php:
+
+Dashboard: statisztikák (játékosok, online, stb. – később finomítható)
+
+admin/players.php:
+
+Játékos keresés, lista, ban/unban funkció (WIP)
+
+admin/news.php:
+
+Hírek létrehozása / szerkesztése / publikálása / törlése
+
+admin/shop_items.php:
+
+Shop itemek kezelése (item_id, price, category, enchant, quantity, available)
+
+admin/purchases.php:
+
+Vásárlások áttekintése, státusz módosítás (delivered/pending/cancelled)
+
+admin/coin_management.php:
+
+Donate coin hozzáadása/levonása játékosoktól, tranzakció logba írással
+
+SNAPSHOT VERZIÓ INFORMÁCIÓ
+
+Current snapshot: v0.9.5
+
+Fő fókusz: Security hardening + teljes L2J Mobius auth kompatibilitás
+
+Még hátralévő főbb feladatok v1.0 előtt:
+
+Forgot password / email alapú jelszó reset
+
+Email kezelés (unique, change_email teljes befejezése)
+
+Search + pagination funkciók (rankings, shop, admin oldalak)
+
+További performance tuning és UX finomhangolás
